@@ -32,10 +32,7 @@ def test_thread():
 	print "passed"	
 
 def client_thread(clientSocket, address):
-	message = None
-	while message == None:
-		print "In Loop"
-		message = clientSocket.recv(2048)
+	message = clientSocket.recv(2048)
 	if message.startswith("CONNECT"):
 		print "Implement Connect"
 	else: 	
