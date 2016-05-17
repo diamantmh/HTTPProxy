@@ -8,10 +8,6 @@ serversocket = None
 def main():
 	openListenSocket(12016)
 
-
-
-
-
 def openListenSocket(port):
 	global serversocket
 	serversocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -19,17 +15,12 @@ def openListenSocket(port):
 	serversocket.bind(('localhost', port))
 	serversocket.listen(5)
 	while True:
-		print "In loop"
 		# accept connections from outside
 		(clientsocket, address) = serversocket.accept()
 		
 		ct = threading.Thread(target=client_thread, args=(clientsocket, address))
 		#ct = threading.Thread(target=test_thread)
-		ct.run()
-
-	
-def test_thread():
-	print "passed"	
+		ct.run()	
 
 def client_thread(clientSocket, address):
 	message = None
@@ -65,7 +56,8 @@ def client_thread(clientSocket, address):
 			hostSocket.close()
 		else:
 			print "hostAddress was None"	
-	print "Connection Terminated"			
+	print "Connection Terminated"	
+	clientSocket.close();		
 
 
 def getAddressFromMessage(message):
