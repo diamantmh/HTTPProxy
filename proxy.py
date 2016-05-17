@@ -12,7 +12,7 @@ def openListenSocket(port):
 	global serversocket
 	serversocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 	serversocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	serversocket.bind(('localhost', port))
+	serversocket.bind(('0.0.0.0', port))
 	serversocket.listen(5)
 	while True:
 		# accept connections from outside
@@ -30,7 +30,6 @@ def client_thread(clientSocket, address):
 	if message.startswith("CONNECT"):
 		print "Implement Connect"
 	else: 	
-
 		message = modifyMessage(message)
 		hostAddress = getAddressFromMessage(message)
 		if hostAddress is not None:
