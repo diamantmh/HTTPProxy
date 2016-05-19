@@ -43,7 +43,7 @@ def host_listen_thread(client_socket, host_socket):
 			response = host_socket.recv(1024)
 			if response == "":
 				keepOpen = False
-			else:	
+			else:
 				client.send(response)
 		host_socket.close()
 		client_socket.close()
@@ -92,12 +92,8 @@ def client_thread(clientSocket, address):
 				hostSocket.connect(hostAddress)
 				hostSocket.send(message)
 				keepOpen = True
-				counter = 1
 				while keepOpen:
-					# print counter
-					counter += 1
 					response = hostSocket.recv(1024)
-					#print response
 					if response == "":
 						keepOpen = False
 					else:	
@@ -113,14 +109,11 @@ def getAddressFromMessage(message):
 	for header in headers:
 		if header.lower().startswith("host"):
 			url = header.split(":", 1)[1].strip()
-			# print url
 			result = urlparse(url)
-			# print result
 			host = result.hostname
 			if host is None:
 				host = result.path
 			host = host.split(":")[0]
-			# print host
 			port = result.port
 			if port is None:
 				url = headers[0].split(" ")[1]
@@ -131,8 +124,7 @@ def getAddressFromMessage(message):
 						port = 443
 					else:	
 						port = 80
-			address = (host, port)	
-			# print address	
+			address = (host, port)		
 			return address
 	return None
 
@@ -144,7 +136,6 @@ def modifyMessage(message):
 		 lines[i].lower().startswith("proxy-connection")):
 			lines[i] = lines[i].replace("keep-alive", "close")
 	return_message = "\n".join(lines) + "\n"
-	# print return_message
 	return return_message
 
 
