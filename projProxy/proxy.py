@@ -6,7 +6,13 @@ from urlparse import urlparse
 serversocket = None
 
 def main():
-	openListenSocket(12016)
+	argv = sys.argv
+
+	if len(argv) != 2:
+		sys.exit()
+
+	port = int(argv[1])	
+	openListenSocket(port)
 
 def openListenSocket(port):
 	global serversocket
