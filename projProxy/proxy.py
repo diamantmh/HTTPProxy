@@ -2,8 +2,16 @@ import socket
 import threading
 import sys
 from urlparse import urlparse
+import datetime
+import pyuv
+import signal
 
 serversocket = None
+clients = []
+server = None
+connections = {}
+lock = threading.RLock()
+
 
 def main():
 	argv = sys.argv
@@ -23,16 +31,26 @@ def openListenSocket(port):
 	print "Proxy listening on 0.0.0.0:%d" % port
 	while True:
 		# accept connections from outside
+		time = datetime.datetime.now()
 		(clientsocket, address) = serversocket.accept()
-		
-		ct = threading.Thread(target=client_thread, args=(clientsocket, address))
+
+		ct = threading.Thread(target=client_thread, args=(clientsocket, address, time))
 		ct.run()
 
 def client_listen_thread(client_socket, host_socket):
 	try:
 		keepOpen = True
 		while keepOpen:
-			response = client_socket.recv(1024)
+			try:
+				lock.acquire()
+				try:
+					response = client_socket.recv(1024)
+				finally:
+					lock.release()	
+			except socket.error as e:
+				continue
+			print "MESSAGE FROM CLIENT"
+			print response
 			if response == "":
 				keepOpen = False
 			else:	
@@ -40,37 +58,49 @@ def client_listen_thread(client_socket, host_socket):
 		host_socket.close()
 		client_socket.close()
 	except Exception as e:
+		print "EXCEPTION:"
+		print e
 		return	
 
 def host_listen_thread(client_socket, host_socket):
 	try:
 		keepOpen = True
+
 		while keepOpen:
-			response = host_socket.recv(1024)
+			try:
+				lock.acquire()
+				try:
+					response = host_socket.recv(1024)
+				finally:
+					lock.release()
+			except socket.error as e:
+				continue	
+			print "MESSAGE FROM HOST"
+			print response
 			if response == "":
 				keepOpen = False
 			else:
-				client.send(response)
+				client_socket.send(response)
 		host_socket.close()
 		client_socket.close()
 	except Exception as e:
+		print "EXCEPTION"
+		print e
 		return	
 
-def client_thread(clientSocket, address):
-	clientSocket.settimeout(1)
+def client_thread(clientSocket, address, time):
+	clientSocket.settimeout(20)
 	keepOpen = True
 	message = ""
-	while keepOpen:
-		try:
-			response = clientSocket.recv(1024)
-		except Exception as e:
-			break
-		if response == "":
-			keepOpen = False
-		message += response
+	try:
+		message = clientSocket.recv(8192)	
+	except Exception as e:
+		print "TIMEOUT"	
+		
 	if len(message) > 0:
 		s = message.split('\n')[0].split(' ')
 		print ">>> %s %s" % (s[0], s[1])
+		time = datetime.datetime.now()
 	if message.startswith("CONNECT"):
 		hostAddress = getAddressFromMessage(message)
 		if hostAddress is not None:
@@ -80,16 +110,18 @@ def client_thread(clientSocket, address):
 			try:
 				hostSocket.connect(hostAddress)
 				clientSocket.send("HTTP/1.0 200 OK")
+				clientSocket.settimeout(1)
+				hostSocket.settimeout(1)
 				tc = threading.Thread(target=client_listen_thread, args=(clientSocket, hostSocket))
 				tc.run()
 				ts = threading.Thread(target=host_listen_thread, args=(clientSocket, hostSocket))
 				ts.run()
 			except socket.error as e:
 				clientSocket.send("HTTP/1.0 502 Bad Gateway")
-
 	else: 	
 		message = modifyMessage(message)
 		hostAddress = getAddressFromMessage(message)
+
 		if hostAddress is not None:
 			hostSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 			hostSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -98,7 +130,9 @@ def client_thread(clientSocket, address):
 				hostSocket.connect(hostAddress)
 				hostSocket.send(message)
 				keepOpen = True
+				counter = 0
 				while keepOpen:
+					counter += 1
 					response = hostSocket.recv(1024)
 					if response == "":
 						keepOpen = False
@@ -107,11 +141,12 @@ def client_thread(clientSocket, address):
 				hostSocket.close()
 			except socket.error as socketerror:
 				print("Error: ", socketerror)	
-		clientSocket.close();		
-
+		clientSocket.close();	
 
 def getAddressFromMessage(message):
 	headers = message.split("\n")
+	host = None
+	port = None
 	for header in headers:
 		if header.lower().startswith("host"):
 			url = header.split(":", 1)[1].strip()
@@ -121,18 +156,25 @@ def getAddressFromMessage(message):
 				host = result.path
 			host = host.split(":")[0]
 			port = result.port
-			if port is None:
-				url = headers[0].split(" ")[1]
-				result = urlparse(url)
-				port = result.port
-				if port is None:
-					if result.scheme == "https":
-						port = 443
-					else:	
-						port = 80
-			address = (host, port)		
-			return address
-	return None
+			break	
+	if port is None:
+		line = headers[0].split(" ")
+		url = None
+		if len(line) > 1:
+			url = line[1]
+		else: 
+			return None			
+		result = urlparse(url)	
+		port = result.port
+		if host == None:
+			host = result.hostname
+		if port is None:
+			if result.scheme == "https":
+				port = 443
+			else:	
+				port = 80		
+	address = (host, port)	
+	return address
 
 def modifyMessage(message):
 	lines = message.split("\n")
