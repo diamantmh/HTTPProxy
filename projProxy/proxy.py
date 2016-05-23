@@ -1,21 +1,15 @@
 import socket
-import threading
 import sys
 from urlparse import urlparse
 import datetime
 import pyuv
 import signal
+from multiprocessing import Process
 
 serversocket = None
-clients = []
-server = None
-connections = {}
-lock = threading.RLock()
-
 
 def main():
 	argv = sys.argv
-
 	if len(argv) != 2:
 		sys.exit()
 
@@ -31,65 +25,58 @@ def openListenSocket(port):
 	print "Proxy listening on 0.0.0.0:%d" % port
 	while True:
 		# accept connections from outside
-		time = datetime.datetime.now()
 		(clientsocket, address) = serversocket.accept()
-
-		ct = threading.Thread(target=client_thread, args=(clientsocket, address, time))
-		ct.run()
+		p = Process(target=client_thread, args=(clientsocket,))
+		p.start()
 
 def client_listen_thread(client_socket, host_socket):
 	try:
 		keepOpen = True
 		while keepOpen:
 			try:
-				lock.acquire()
-				try:
-					response = client_socket.recv(1024)
-				finally:
-					lock.release()	
+				response = client_socket.recv(1024)	
+			except socket.timeout as e:
+				continue	
 			except socket.error as e:
-				continue
-			print "MESSAGE FROM CLIENT"
-			print response
+				break	
 			if response == "":
 				keepOpen = False
 			else:	
-				host_socket.send(response)
-		host_socket.close()
-		client_socket.close()
+				host_socket.send(response)	
+	
 	except Exception as e:
-		print "EXCEPTION:"
-		print e
 		return	
+	finally:
+		host_socket.shutdown(socket.SHUT_RDWR)
+		client_socket.shutdown(socket.SHUT_RDWR)
+		host_socket.close()
+		client_socket.close()	
 
 def host_listen_thread(client_socket, host_socket):
 	try:
 		keepOpen = True
-
 		while keepOpen:
 			try:
-				lock.acquire()
-				try:
-					response = host_socket.recv(1024)
-				finally:
-					lock.release()
-			except socket.error as e:
+				response = host_socket.recv(1024)
+			except socket.timeout as e:
 				continue	
-			print "MESSAGE FROM HOST"
-			print response
+			except socket.error as e:
+				break	
 			if response == "":
 				keepOpen = False
 			else:
 				client_socket.send(response)
-		host_socket.close()
-		client_socket.close()
+		
 	except Exception as e:
-		print "EXCEPTION"
-		print e
 		return	
+	finally:
+		host_socket.shutdown(socket.SHUT_RDWR)
+		client_socket.shutdown(socket.SHUT_RDWR)
+		host_socket.close()
+		client_socket.close()	
 
-def client_thread(clientSocket, address, time):
-	clientSocket.settimeout(20)
+def client_thread(clientSocket):
+	clientSocket.settimeout(3)
 	keepOpen = True
 	message = ""
 	try:
@@ -100,48 +87,49 @@ def client_thread(clientSocket, address, time):
 	if len(message) > 0:
 		s = message.split('\n')[0].split(' ')
 		print ">>> %s %s" % (s[0], s[1])
-		time = datetime.datetime.now()
-	if message.startswith("CONNECT"):
-		hostAddress = getAddressFromMessage(message)
-		if hostAddress is not None:
-			hostSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			hostSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-			hostSocket.bind(("",0)) #Binds to open port
+	hostAddress = getAddressFromMessage(message)
+	message = modifyMessage(message)	
+	if hostAddress is not None:
+		hostSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+		hostSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+		hostSocket.bind(("",0)) #Binds to open port
+		if message.startswith("CONNECT"):
 			try:
+				print 1
 				hostSocket.connect(hostAddress)
 				clientSocket.send("HTTP/1.0 200 OK")
 				clientSocket.settimeout(1)
 				hostSocket.settimeout(1)
-				tc = threading.Thread(target=client_listen_thread, args=(clientSocket, hostSocket))
-				tc.run()
-				ts = threading.Thread(target=host_listen_thread, args=(clientSocket, hostSocket))
-				ts.run()
+				pc = Process(target=client_listen_thread, args=(clientSocket, hostSocket))
+				pc.start()
+				ps = Process(target=host_listen_thread, args=(clientSocket, hostSocket))
+				ps.start()
+				print 2
 			except socket.error as e:
 				clientSocket.send("HTTP/1.0 502 Bad Gateway")
-	else: 	
-		message = modifyMessage(message)
-		hostAddress = getAddressFromMessage(message)
-
-		if hostAddress is not None:
-			hostSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-			hostSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-			hostSocket.bind(("",0)) #Binds to open port
+		else: 	
+			hostSocket.settimeout(1)
 			try:
 				hostSocket.connect(hostAddress)
 				hostSocket.send(message)
 				keepOpen = True
-				counter = 0
 				while keepOpen:
-					counter += 1
-					response = hostSocket.recv(1024)
+					try:
+						response = hostSocket.recv(1024)
+					except socket.timeout as e:
+						continue	
+					except socket.error as e:
+						break		
 					if response == "":
 						keepOpen = False
 					else:	
 						clientSocket.send(response)
 				hostSocket.close()
 			except socket.error as socketerror:
-				print("Error: ", socketerror)	
-		clientSocket.close();	
+				print("Error: ", socketerror)
+			finally:	
+				hostSocket.close()	
+				clientSocket.close();	
 
 def getAddressFromMessage(message):
 	headers = message.split("\n")
